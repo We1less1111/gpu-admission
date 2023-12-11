@@ -41,43 +41,158 @@ Other options
       --vmodule moduleSpec               comma-separated list of pattern=N settings for file-filtered logging
 ```
 
-### 2.2 Configure kube-scheduler policy file, and run a kubernetes cluster.
+### 2.2 Configure kubernetes scheduler.
 
-Example for scheduler-policy-config.json:
+
+参考gpu-scheduler.yaml
 ```
-{
-  "kind": "Policy",
-  "apiVersion": "v1",
-  "predicates": [
-    {
-      "name": "PodFitsHostPorts"
-    },
-    {
-      "name": "PodFitsResources"
-    },
-    {
-      "name": "NoDiskConflict"
-    },
-    {
-      "name": "MatchNodeSelector"
-    },
-    {
-      "name": "HostName"
-    }
-  ],
-  "extenders": [
-    {
-      "urlPrefix": "http://<gpu-admission ip>:<gpu-admission port>/scheduler",
-      "apiVersion": "v1beta1",
-      "filterVerb": "predicates",
-      "enableHttps": false,
-      "nodeCacheCapable": false
-    }
-  ],
-  "hardPodAffinitySymmetricWeight": 10,
-  "alwaysCheckAllPredicates": false
-}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    component: scheduler
+    tier: control-plane
+    app: gpu-admission
+  name: gpu-admission
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      component: scheduler
+      tier: control-plane
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        component: scheduler
+        tier: control-plane
+        version: second
+        app: gpu-admission
+    spec:
+      containers:
+      - image: thomassong/gpu-admission:47d56ae9
+        name: gpu-admission
+        env:
+          - name: LOG_LEVEL
+            value: "4"
+        ports:
+          - containerPort: 3456
+        volumeMounts:
+          - name: kubeconfig
+            mountPath: /etc/kubernetes/scheduler.conf
+            readOnly: true
+      dnsPolicy: ClusterFirstWithHostNet
+      hostNetwork: true
+      priority: 2000000000
+      priorityClassName: system-cluster-critical
+      volumes:
+        - name: kubeconfig
+          hostPath:
+            path: /etc/kubernetes/scheduler.conf
+            type: FileOrCreate
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: gpu-admission
+  namespace: kube-system
+spec:
+  ports:
+  - port: 3456
+    protocol: TCP
+    targetPort: 3456
+  selector:
+    app: gpu-admission
+  type: ClusterIP
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gpu-scheduler-config
+  namespace: kube-system
+data:
+  gpu-scheduler-config.yaml: |
+    apiVersion: kubescheduler.config.k8s.io/v1beta2
+    kind: KubeSchedulerConfiguration
+    profiles:
+      - schedulerName: gpu-scheduler
+    leaderElection:
+      leaderElect: false
+    extenders:
+      - urlPrefix: "http://gpu-admission.kube-system:3456/scheduler"
+        filterVerb: "predicates"
+        enableHTTPS: false
+        nodeCacheCapable: false
+   
+---
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    component: scheduler
+    tier: control-plane
+  name: gpu-scheduler
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      component: scheduler
+      tier: control-plane
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        component: scheduler
+        tier: control-plane
+        version: second
+    spec:
+      containers:
+      - command:
+        - kube-scheduler
+        - --bind-address=127.0.0.1
+        - --leader-elect=false
+        - --kubeconfig=/etc/kubernetes/scheduler.conf
+        - --config=/etc/kubernetes/my-scheduler/gpu-scheduler-config.yaml
+        image: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.23.6
+        imagePullPolicy: IfNotPresent
+        name: kube-second-scheduler
+        volumeMounts:
+          - name: kubeconfig
+            mountPath: /etc/kubernetes/scheduler.conf
+            readOnly: true
+          - name: config-volume
+            mountPath: /etc/kubernetes/my-scheduler
+      hostNetwork: false
+      hostPID: false
+      volumes:
+        - name: kubeconfig
+          hostPath:
+            path: /etc/kubernetes/scheduler.conf
+            type: FileOrCreate
+        - name: config-volume
+          configMap:
+            name: gpu-scheduler-config
+
+# kubectl delete deployment gpu-admission -n kube-system
+# kubectl delete service gpu-admission -n kube-system
+# kubectl delete deployment gpu-scheduler -n kube-system
+# kubectl delete ConfigMap gpu-scheduler-config -n kube-system
+
+
 ```
+删除gpu调度器插件
+kubectl delete deployment gpu-admission -n kube-system
+
+kubectl delete service gpu-admission -n kube-system
+kubectl delete deployment gpu-scheduler -n kube-system
+
+kubectl delete ConfigMap gpu-scheduler-config -n kube-system
 
 Do not forget to add config for scheduler: `--policy-config-file=XXX --use-legacy-policy-config=true`.
 Keep this extender as the last one of all scheduler extenders.
+
+### 2.3 Configure volcano scheduler.
