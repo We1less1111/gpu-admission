@@ -18,6 +18,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
@@ -75,7 +76,10 @@ func main() {
 		klog.Fatalf("Failed to new gpu quota filter: %s", err.Error())
 	}
 	route.AddPredicate(router, gpuFilter)
-
+	route.AddVPredicate(router, gpuFilter)
+	router.GET("/hello", func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		fmt.Fprint(w, "Hello, World!")
+	})
 	go func() {
 		log.Println(http.ListenAndServe(profileAddress, nil))
 	}()
