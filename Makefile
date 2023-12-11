@@ -1,8 +1,8 @@
+#!/bin/bash
 
 .PHONY: all
 all:
 	hack/build.sh
-
 .PHONY: clean
 clean:
 	rm -rf bin/ _output/ go .version-defs

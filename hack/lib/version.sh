@@ -1,7 +1,5 @@
 #!/bin/bash
-
 readonly GO_PACKAGE=tkestack.io/gaiastack/gpu-admission
-
 # -----------------------------------------------------------------------------
 # Version management helpers.  These functions help to set, save and load the
 # following variables:
@@ -34,7 +32,7 @@ api::version::get_version_vars() {
     # something like 'HEAD -> release-1.8, tag: v1.8.3' where then 'tag: '
     # can be extracted from it.
     if [[ '$Format:%D$' =~ tag:\ (v[^ ]+) ]]; then
-     GIT_VERSION="${BASH_REMATCH[1]}"
+      GIT_VERSION="${BASH_REMATCH[1]}"
     fi
   fi
 
