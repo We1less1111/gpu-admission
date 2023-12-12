@@ -187,7 +187,7 @@ spec:
 
 
 ### 2.3 Configure volcano scheduler.
-kubectl edit configmap volcano-scheduler-configmap -n volcano-stack
+
 ```
 apiVersion: apps/v1
 kind: Deployment
@@ -213,7 +213,11 @@ spec:
         app: gpu-scheduler
     spec:
       containers:
-      - image: thomassong/gpu-admission:47d56ae9
+      - command:
+        - gpu-admission
+        - --address=0.0.0.0:3456
+        - --kubeconfig=/etc/kubernetes/scheduler.conf
+        image: g-ubjg5602-docker.pkg.coding.net/iscas-system/containers/gpu-scheduler:v1.0.0
         name: gpu-scheduler
         env:
           - name: LOG_LEVEL
@@ -247,7 +251,11 @@ spec:
   selector:
     app: gpu-scheduler
   type: ClusterIP
----
+# kubectl delete deployment gpu-scheduler -n kube-stack
+# kubectl delete service gpu-scheduler -n kube-stack
+```
+#### kubectl edit configmap volcano-scheduler-configmap -n volcano-stack
+```
 - plugins:
       - name: overcommit
       - name: drf
@@ -258,9 +266,4 @@ spec:
           extender.httpTimeout: 1000ms
           extender.predicateVerb: vpredicates
           extender.ignorable: false
-
-# kubectl delete deployment gpu-scheduler -n kube-stack
-# kubectl delete service gpu-scheduler -n kube-stack
-# kubectl delete deployment gpu-scheduler -n kube-stack
-# kubectl delete ConfigMap gpu-scheduler-config -n kube-stack
 ```
