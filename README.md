@@ -44,7 +44,7 @@ Other options
 ### 2.2 Configure kubernetes scheduler.
 
 
-参考gpu-scheduler.yaml
+gpu-scheduler.yaml
 ```
 apiVersion: apps/v1
 kind: Deployment
@@ -184,15 +184,83 @@ spec:
 
 
 ```
-删除gpu调度器插件
-kubectl delete deployment gpu-admission -n kube-system
 
-kubectl delete service gpu-admission -n kube-system
-kubectl delete deployment gpu-scheduler -n kube-system
-
-kubectl delete ConfigMap gpu-scheduler-config -n kube-system
-
-Do not forget to add config for scheduler: `--policy-config-file=XXX --use-legacy-policy-config=true`.
-Keep this extender as the last one of all scheduler extenders.
 
 ### 2.3 Configure volcano scheduler.
+kubectl edit configmap volcano-scheduler-configmap -n volcano-stack
+```
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    component: scheduler
+    tier: control-plane
+    app: gpu-scheduler
+  name: gpu-scheduler
+  namespace: kube-stack
+spec:
+  selector:
+    matchLabels:
+      component: scheduler
+      tier: control-plane
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        component: scheduler
+        tier: control-plane
+        version: second
+        app: gpu-scheduler
+    spec:
+      containers:
+      - image: thomassong/gpu-admission:47d56ae9
+        name: gpu-scheduler
+        env:
+          - name: LOG_LEVEL
+            value: "4"
+        ports:
+          - containerPort: 3456
+        volumeMounts:
+          - name: kubeconfig
+            mountPath: /etc/kubernetes/scheduler.conf
+            readOnly: true
+      dnsPolicy: ClusterFirstWithHostNet
+      hostNetwork: true
+      priority: 2000000000
+      priorityClassName: system-cluster-critical
+      volumes:
+        - name: kubeconfig
+          hostPath:
+            path: /etc/kubernetes/scheduler.conf
+            type: FileOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gpu-scheduler
+  namespace: kube-stack
+spec:
+  ports:
+  - port: 3456
+    protocol: TCP
+    targetPort: 3456
+  selector:
+    app: gpu-scheduler
+  type: ClusterIP
+---
+- plugins:
+      - name: overcommit
+      - name: drf
+        enablePreemptable: false
+      - name: extender
+        arguments:
+          extender.urlPrefix: http://gpu-scheduler.kube-stack:3456/scheduler
+          extender.httpTimeout: 1000ms
+          extender.predicateVerb: vpredicates
+          extender.ignorable: false
+
+# kubectl delete deployment gpu-scheduler -n kube-stack
+# kubectl delete service gpu-scheduler -n kube-stack
+# kubectl delete deployment gpu-scheduler -n kube-stack
+# kubectl delete ConfigMap gpu-scheduler-config -n kube-stack
+```

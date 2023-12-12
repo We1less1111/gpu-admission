@@ -61,11 +61,21 @@ function api::build::prepare_build() {
 function api::build::generate() {
   api::log::status "Generating image..."
   (
+    img="gpu-scheduler"
+    repo="g-ubjg5602-docker.pkg.coding.net/iscas-system/containers"
+
     cd "${LOCAL_OUTPUT_ROOT}"
-    docker build -t $IMAGE \
-      --build-arg version=${VERSION} \
-      --build-arg commit=${GITCOMMIT} \
-      .
+    #docker build -t $IMAGE --build-arg version=${VERSION} --build-arg commit=${GITCOMMIT} .
+
+    # docker buildx create --name mybuilder --driver docker-container
+    docker buildx use mybuilder
+    docker run --privileged --rm tonistiigi/binfmt --install all
+    docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+    docker buildx build    --platform linux/amd64,linux/arm64  --build-arg version=${VERSION} --build-arg commit=${GITCOMMIT}   -t $repo/$img:$VERSION --push  .
+
+    # export to local
+    #docker buildx build  ${ROOT}/go/build   --platform linux/amd64 ${BUILD_FLAGS:-} --build-arg version=${version} --build-arg commit=${commit}  --build-arg base_img=${base_img} -t $img:$version --load   -f ${ROOT}/build/Dockerfile
+
   )
 }
 
