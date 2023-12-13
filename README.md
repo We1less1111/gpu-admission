@@ -351,7 +351,11 @@ kubectl edit configmap volcano-scheduler-configmap -n volcano-system
            extender.ignorable: false -->
 
 ```
-## 4. delete what you have create
+## 4. Apply
+schedulerName: gpu-scheduler
+schedulerName: volcano
+maybe found in your yaml file
+## 5. delete what you have create
 ```
 kubectl delete deployment gpu-admission -n kube-stack
 kubectl delete service gpu-admission -n kube-stack
