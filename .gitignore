@@ -3,3 +3,4 @@ bin/**/*
 go/**/*
 .idea/
 _output/
+scheduler.conf

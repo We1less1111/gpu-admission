@@ -15,9 +15,8 @@ It provides the following features:
 $ make build
 ```
 
-## 2. Run
 
-### 2.1 Run gpu-admission.
+## 2. Run gpu-admission.
 
 ```
 $ bin/gpu-admission --address=127.0.0.1:3456 --v=4 --kubeconfig <your kubeconfig> --logtostderr=true
@@ -40,12 +39,162 @@ Other options
       --version version[=true]           Print version information and quit
       --vmodule moduleSpec               comma-separated list of pattern=N settings for file-filtered logging
 ```
-
-### 2.2 Configure kubernetes scheduler.
-
-
-gpu-scheduler.yaml
+## 3. Run gpu-admission in scheduler
+### 3.1 Create scheduler serviceAccountName.
 ```
+# 1. 创建ClusterRole--gpu-scheduler-clusterrole
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: gpu-scheduler-clusterrole
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - endpoints
+      - events
+    verbs:
+      - create
+      - get
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+      - namespaces
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - delete
+      - get
+      - list
+      - watch
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - bindings
+      - pods/binding
+    verbs:
+      - create
+  - apiGroups:
+      - ""
+    resources:
+      - pods/status
+    verbs:
+      - patch
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - replicationcontrollers
+      - services
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+      - extensions
+    resources:
+      - replicasets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - apps
+    resources:
+      - statefulsets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - policy
+    resources:
+      - poddisruptionbudgets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - persistentvolumeclaims
+      - persistentvolumes
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - "storage.k8s.io"
+    resources:
+      - storageclasses
+      - csinodes
+      - csistoragecapacities
+      - csidrivers
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - "coordination.k8s.io"
+    resources:
+      - leases
+    verbs:
+      - create
+      - get
+      - list
+      - update
+  - apiGroups:
+      - "events.k8s.io"
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+      - update
+---
+# 2. 创建ServiceAccount--gpu-scheduler-sa
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: gpu-scheduler-sa
+  namespace: kube-stack
+---
+# 3. 创建ClusterRoleBinding--ServiceAccount绑定 gpu-scheduler-clusterrole的ClusterRole
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: gpu-scheduler-clusterrolebinding
+  namespace: kube-stack
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gpu-scheduler-clusterrole
+subjects:
+  - kind: ServiceAccount
+    name: gpu-scheduler-sa
+    namespace: kube-stack
+```
+### 3.2 Deployment gpu-admission
+```
+# 4. 创建Deployment--gpu-admission
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -54,7 +203,7 @@ metadata:
     tier: control-plane
     app: gpu-admission
   name: gpu-admission
-  namespace: kube-system
+  namespace: kube-stack
 spec:
   selector:
     matchLabels:
@@ -69,9 +218,14 @@ spec:
         version: second
         app: gpu-admission
     spec:
+      serviceAccountName: gpu-scheduler-sa
       containers:
-      - image: thomassong/gpu-admission:47d56ae9
-        name: gpu-admission
+      - command:
+        - gpu-admission
+        - --address=0.0.0.0:3456
+        - --kubeconfig=/etc/kubernetes/scheduler.conf
+        image: g-ubjg5602-docker.pkg.coding.net/iscas-system/containers/gpu-scheduler:v1.0.0
+        name: gpu-scheduler
         env:
           - name: LOG_LEVEL
             value: "4"
@@ -92,11 +246,12 @@ spec:
             type: FileOrCreate
 ---
 
+# 5. 创建Service--gpu-admission
 apiVersion: v1
 kind: Service
 metadata:
   name: gpu-admission
-  namespace: kube-system
+  namespace: kube-stack
 spec:
   ports:
   - port: 3456
@@ -105,14 +260,15 @@ spec:
   selector:
     app: gpu-admission
   type: ClusterIP
-
----
-
+```
+### 3.3.1  gpu-admission extender in k8s-scheduler
+```
+# 6.1 gpu-admission extender  in k8s-scheduler
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: gpu-scheduler-config
-  namespace: kube-system
+  namespace: kube-stack
 data:
   gpu-scheduler-config.yaml: |
     apiVersion: kubescheduler.config.k8s.io/v1beta2
@@ -122,13 +278,12 @@ data:
     leaderElection:
       leaderElect: false
     extenders:
-      - urlPrefix: "http://gpu-admission.kube-system:3456/scheduler"
+      - urlPrefix: "http://gpu-admission.kube-stack:3456/scheduler"
         filterVerb: "predicates"
         enableHTTPS: false
         nodeCacheCapable: false
    
 ---
-
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -136,7 +291,7 @@ metadata:
     component: scheduler
     tier: control-plane
   name: gpu-scheduler
-  namespace: kube-system
+  namespace: kube-stack
 spec:
   selector:
     matchLabels:
@@ -150,6 +305,7 @@ spec:
         tier: control-plane
         version: second
     spec:
+      serviceAccountName: gpu-scheduler-sa
       containers:
       - command:
         - kube-scheduler
@@ -177,93 +333,31 @@ spec:
           configMap:
             name: gpu-scheduler-config
 
-# kubectl delete deployment gpu-admission -n kube-system
-# kubectl delete service gpu-admission -n kube-system
-# kubectl delete deployment gpu-scheduler -n kube-system
-# kubectl delete ConfigMap gpu-scheduler-config -n kube-system
-
-
 ```
 
-
-### 2.3 Configure volcano scheduler.
-
+### 3.3.2  gpu-admission extender in volcano-scheduler
 ```
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  labels:
-    component: scheduler
-    tier: control-plane
-    app: gpu-scheduler
-  name: gpu-scheduler
-  namespace: kube-stack
-spec:
-  selector:
-    matchLabels:
-      component: scheduler
-      tier: control-plane
-  replicas: 1
-  template:
-    metadata:
-      labels:
-        component: scheduler
-        tier: control-plane
-        version: second
-        app: gpu-scheduler
-    spec:
-      containers:
-      - command:
-        - gpu-admission
-        - --address=0.0.0.0:3456
-        - --kubeconfig=/etc/kubernetes/scheduler.conf
-        image: g-ubjg5602-docker.pkg.coding.net/iscas-system/containers/gpu-scheduler:v1.0.0
-        name: gpu-scheduler
-        env:
-          - name: LOG_LEVEL
-            value: "4"
-        ports:
-          - containerPort: 3456
-        volumeMounts:
-          - name: kubeconfig
-            mountPath: /etc/kubernetes/scheduler.conf
-            readOnly: true
-      dnsPolicy: ClusterFirstWithHostNet
-      hostNetwork: true
-      priority: 2000000000
-      priorityClassName: system-cluster-critical
-      volumes:
-        - name: kubeconfig
-          hostPath:
-            path: /etc/kubernetes/scheduler.conf
-            type: FileOrCreate
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: gpu-scheduler
-  namespace: kube-stack
-spec:
-  ports:
-  - port: 3456
-    protocol: TCP
-    targetPort: 3456
-  selector:
-    app: gpu-scheduler
-  type: ClusterIP
-# kubectl delete deployment gpu-scheduler -n kube-stack
-# kubectl delete service gpu-scheduler -n kube-stack
-```
-#### kubectl edit configmap volcano-scheduler-configmap -n volcano-stack
-```
+# 6.2 gpu-admission extender in volcano-scheduler
+kubectl edit configmap volcano-scheduler-configmap -n volcano-system
 - plugins:
-      - name: overcommit
-      - name: drf
-        enablePreemptable: false
-      - name: extender
-        arguments:
-          extender.urlPrefix: http://gpu-scheduler.kube-stack:3456/scheduler
-          extender.httpTimeout: 1000ms
-          extender.predicateVerb: vpredicates
-          extender.ignorable: false
+       - name: overcommit
+       - name: drf
+         enablePreemptable: false
+       - name: extender
+         arguments:
+           extender.urlPrefix: http://gpu-admission.kube-stack:3456/scheduler
+           extender.httpTimeout: 1000ms
+           extender.predicateVerb: vpredicates
+           extender.ignorable: false -->
+
+```
+## 4. delete what you have create
+```
+kubectl delete deployment gpu-admission -n kube-stack
+kubectl delete service gpu-admission -n kube-stack
+kubectl delete deployment gpu-scheduler -n kube-stack
+kubectl delete ConfigMap gpu-scheduler-config -n kube-stack
+kubectl delete serviceaccount gpu-scheduler-sa -n kube-stack
+kubectl delete clusterrolebinding gpu-scheduler-clusterrolebinding -n kube-stack
+
 ```
