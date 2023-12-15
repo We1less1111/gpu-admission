@@ -430,8 +430,8 @@ spec:
 ```
 
 ## 4. Apply
-schedulerName: gpu-scheduler
-schedulerName: volcano
+schedulerName: gpu-scheduler/volcano
+
 maybe found in your yaml file
 ## 5. delete what you have create
 ```
@@ -442,4 +442,8 @@ kubectl delete ConfigMap gpu-scheduler-config -n kube-stack
 kubectl delete serviceaccount gpu-scheduler-sa -n kube-stack
 kubectl delete clusterrolebinding gpu-scheduler-clusterrolebinding -n kube-stack
 
+
+# volcano plugin
+kubectl delete deployment volcano-scheduler-gpu -n kube-stack
+kubectl delete configmap volcano-scheduler-gpu-configmap -n kube-stack
 ```
